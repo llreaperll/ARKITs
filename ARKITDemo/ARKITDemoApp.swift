@@ -11,7 +11,7 @@ import SwiftUI
 struct ARKITDemoApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            HomeView()
         }
     }
 }

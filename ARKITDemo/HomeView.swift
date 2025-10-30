@@ -1,9 +1,12 @@
 import SwiftUI
+import AVFoundation
+import ARKit
 
 struct HomeView: View {
     @State private var selectedCategory: ARCategory = .creative
     @State private var showingARView = false
     @State private var selectedExperience: ARExperience? = nil
+    @State private var experienceToShow: ARExperience? = nil // Add this new state
     
     var body: some View {
         NavigationView {
@@ -29,8 +32,19 @@ struct HomeView: View {
                                 ARExperienceCard(
                                     experience: experience,
                                     action: {
+                                        print("🚀 Card action triggered for: \(experience.title)")
+                                        print("🔍 Setting selectedExperience to: \(experience.id)")
                                         selectedExperience = experience
+                                        experienceToShow = experience // Set both states
+                                        print("🔍 selectedExperience is now: \(selectedExperience?.title ?? "nil")")
+                                        print("🔍 experienceToShow is now: \(experienceToShow?.title ?? "nil")")
                                         showingARView = true
+                                        print("🔧 showingARView set to: \(showingARView)")
+                                        
+                                        // Add a small delay to see if timing is the issue
+                                        DispatchQueue.main.async {
+                                            print("🕐 Async check - selectedExperience: \(selectedExperience?.title ?? "nil")")
+                                        }
                                     }
                                 )
                             }
@@ -48,8 +62,70 @@ struct HomeView: View {
             .navigationBarHidden(true)
         }
         .fullScreenCover(isPresented: $showingARView) {
-            if let experience = selectedExperience {
-                ARExperienceView(experience: experience, isPresented: $showingARView)
+            // Use experienceToShow instead of selectedExperience
+            if let experience = experienceToShow {
+                // Show actual AR experiences for ready ones
+                switch experience.title {
+                case "Object Playground":
+                    ObjectPlaygroundView(isPresented: $showingARView)
+                        .onAppear {
+                            print("✅ Experience found: \(experience.title)")
+                            print("🎮 Showing Object Playground")
+                        }
+                case "AR Video Player":
+                    ARVideoPlayerView(isPresented: $showingARView)
+                        .onAppear {
+                            print("✅ Experience found: \(experience.title)")
+                            print("🎬 Showing AR Video Player")
+                        }
+                case "AR Ruler":
+                    ARRulerView(isPresented: $showingARView)
+                        .onAppear {
+                            print("✅ Experience found: \(experience.title)")
+                            print("📏 Showing AR Ruler")
+                        }
+                default:
+                    ARExperienceView(experience: experience, isPresented: $showingARView)
+                        .onAppear {
+                            print("✅ Experience found: \(experience.title)")
+                            print("🔄 Showing default experience: \(experience.title)")
+                        }
+                }
+            } else {
+                VStack {
+                    Text("No experience selected")
+                        .foregroundColor(.white)
+                        .font(.title)
+                        .padding()
+                    
+                    Text("Debug: experienceToShow is nil")
+                        .foregroundColor(.red)
+                        .padding()
+                    
+                    Button("Back") {
+                        showingARView = false
+                        experienceToShow = nil // Clear both when closing
+                        selectedExperience = nil
+                    }
+                    .padding()
+                    .background(.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(10)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(.black)
+                .onAppear {
+                    print("❌ No experience selected - experienceToShow is nil")
+                    print("🔍 showingARView: \(showingARView)")
+                }
+            }
+        }
+        .onChange(of: showingARView) { oldValue, newValue in
+            if !newValue {
+                // Clear the experience when sheet is dismissed
+                experienceToShow = nil
+                selectedExperience = nil
+                print("🧹 Cleared experience states")
             }
         }
     }
@@ -203,7 +279,10 @@ struct ARExperienceCard: View {
     @State private var isHovered = false
     
     var body: some View {
-        Button(action: action) {
+        Button(action: {
+            print("🎯 Tapped experience: \(experience.title)")
+            action()
+        }) {
             VStack(spacing: 0) {
                 // Icon and gradient background
                 ZStack {
@@ -245,6 +324,7 @@ struct ARExperienceCard: View {
                                 .font(.caption)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
+                                .lineLimit(2)
                                 .background(.white.opacity(0.2))
                                 .cornerRadius(8)
                                 .foregroundColor(.white)
@@ -377,34 +457,448 @@ struct AnimatedGradientBackground: View {
     }
 }
 
-// MARK: - Placeholder AR Experience View
+// MARK: - Enhanced Placeholder AR Experience View
 struct ARExperienceView: View {
     let experience: ARExperience
+    @Binding var isPresented: Bool
+    @State private var isAnimating = false
+    
+    var body: some View {
+        ZStack {
+            // Gradient background matching the card
+            LinearGradient(
+                colors: experience.gradientColors + [Color.black],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+            
+            VStack(spacing: 40) {
+                // Animated icon
+                ZStack {
+                    Circle()
+                        .fill(.white.opacity(0.1))
+                        .frame(width: 150, height: 150)
+                        .blur(radius: 30)
+                        .scaleEffect(isAnimating ? 1.2 : 0.8)
+                        .animation(.easeInOut(duration: 2).repeatForever(autoreverses: true), value: isAnimating)
+                    
+                    Image(systemName: experience.icon)
+                        .font(.system(size: 60, weight: .light))
+                        .foregroundColor(.white)
+                        .rotationEffect(.degrees(isAnimating ? 360 : 0))
+                        .animation(.linear(duration: 10).repeatForever(autoreverses: false), value: isAnimating)
+                }
+                
+                VStack(spacing: 16) {
+                    Text(experience.title)
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
+                    
+                    Text(experience.description)
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.white.opacity(0.8))
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(4)
+                        .padding(.horizontal, 20)
+                    
+                    // Features list
+                    LazyVGrid(columns: [
+                        GridItem(.flexible()),
+                        GridItem(.flexible())
+                    ], spacing: 12) {
+                        ForEach(experience.features, id: \.self) { feature in
+                            Text(feature)
+                                .font(.system(size: 14, weight: .medium))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(.white.opacity(0.2))
+                                .cornerRadius(12)
+                                .foregroundColor(.white)
+                        }
+                    }
+                    .padding(.top, 8)
+                    .padding(.horizontal, 20)
+                }
+                
+                VStack(spacing: 20) {
+                    // Status
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(experience.status.color)
+                            .frame(width: 8, height: 8)
+                        
+                        Text(experience.status == .comingSoon ? "Coming Soon" : experience.status == .beta ? "In Development" : "Available")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(experience.status.color)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(.black.opacity(0.3))
+                    .cornerRadius(16)
+                    
+                    // Back button
+                    Button("Back to Home") {
+                        isPresented = false
+                    }
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 16)
+                    .background(.white.opacity(0.2))
+                    .cornerRadius(25)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 25)
+                            .stroke(.white.opacity(0.3), lineWidth: 1)
+                    )
+                }
+            }
+            .padding(20)
+            .onAppear {
+                isAnimating = true
+            }
+            
+            // Back button in top corner
+            VStack {
+                HStack {
+                    Button(action: {
+                        isPresented = false
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 18, weight: .semibold))
+                            Text("Back")
+                                .font(.system(size: 16, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(20)
+                        .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                    }
+                    
+                    Spacer()
+                }
+                .padding(.top, 50)
+                .padding(.horizontal, 20)
+                
+                Spacer()
+            }
+        }
+    }
+}
+
+// MARK: - Object Playground Wrapper
+struct ObjectPlaygroundView: View {
+    @Binding var isPresented: Bool
+    @State private var showingPermissionAlert = false
+    @State private var cameraPermissionDenied = false
+    
+    var body: some View {
+        ZStack {
+            if cameraPermissionDenied {
+                // Show permission denied screen
+                PermissionDeniedView(isPresented: $isPresented)
+            } else {
+                // Show AR experience
+                ContentView()
+                
+                // Back button overlay - positioned to not overlap with AR Playground title
+                VStack {
+                    HStack {
+                        Button(action: {
+                            isPresented = false
+                        }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "chevron.left")
+                                    .font(.system(size: 16, weight: .semibold))
+                                Text("Back")
+                                    .font(.system(size: 14, weight: .semibold))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(.black.opacity(0.7))
+                            .cornerRadius(15)
+                            .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+                        }
+                        
+                        Spacer()
+                    }
+                    .padding(.top, 60) // Increased from 50 to 60 to avoid overlap
+                    .padding(.horizontal, 20)
+                    
+                    Spacer()
+                }
+            }
+        }
+        .navigationBarHidden(true)
+        .onAppear {
+            checkCameraPermission()
+        }
+    }
+    
+    private func checkCameraPermission() {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            // Camera access already granted
+            cameraPermissionDenied = false
+            
+        case .notDetermined:
+            // Request permission
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    self.cameraPermissionDenied = !granted
+                }
+            }
+            
+        case .denied, .restricted:
+            // Permission denied
+            cameraPermissionDenied = true
+            
+        @unknown default:
+            cameraPermissionDenied = true
+        }
+    }
+}
+
+// MARK: - Simple Debug Object Playground
+//struct ObjectPlaygroundView: View {
+//    @Binding var isPresented: Bool
+//    
+//    var body: some View {
+//        ZStack {
+//            // Bright red background so we can see if this view loads
+//            Color.red.ignoresSafeArea()
+//            
+//            VStack(spacing: 20) {
+//                Text("OBJECT PLAYGROUND DEBUG")
+//                    .font(.title)
+//                    .foregroundColor(.white)
+//                    .onAppear {
+//                        print("🔴 ObjectPlaygroundView appeared!")
+//                    }
+//                
+//                Text("If you see this, navigation is working")
+//                    .foregroundColor(.white)
+//                
+//                Button("Test ContentView") {
+//                    print("🔵 Test button tapped")
+//                }
+//                .padding()
+//                .background(.blue)
+//                .foregroundColor(.white)
+//                .cornerRadius(10)
+//                
+//                Button("Back") {
+//                    print("🔙 Back button tapped")
+//                    isPresented = false
+//                }
+//                .padding()
+//                .background(.green)
+//                .foregroundColor(.white)
+//                .cornerRadius(10)
+//            }
+//        }
+//        .navigationBarHidden(true)
+//        .onAppear {
+//            print("🎯 ObjectPlaygroundView body rendered")
+//        }
+//    }
+//}
+
+// MARK: - Permission Denied View
+struct PermissionDeniedView: View {
     @Binding var isPresented: Bool
     
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             
-            VStack(spacing: 20) {
-                Image(systemName: experience.icon)
+            VStack(spacing: 30) {
+                Image(systemName: "camera.fill")
                     .font(.system(size: 60))
-                    .foregroundColor(.white)
+                    .foregroundColor(.red)
                 
-                Text(experience.title)
-                    .font(.title)
-                    .foregroundColor(.white)
-                
-                Text("AR Experience Coming Soon...")
-                    .foregroundColor(.white.opacity(0.7))
-                
-                Button("Back to Home") {
-                    isPresented = false
+                VStack(spacing: 16) {
+                    Text("Camera Permission Required")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(.white)
+                    
+                    Text("This AR experience needs camera access to work. Please enable camera permission in Settings.")
+                        .font(.system(size: 16))
+                        .foregroundColor(.white.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
                 }
-                .foregroundColor(.blue)
-                .padding()
-                .background(.white.opacity(0.1))
-                .cornerRadius(12)
+                
+                VStack(spacing: 16) {
+                    Button("Open Settings") {
+                        if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
+                            UIApplication.shared.open(settingsUrl)
+                        }
+                    }
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
+                    .background(.blue)
+                    .cornerRadius(20)
+                    
+                    Button("Back to Home") {
+                        isPresented = false
+                    }
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
+                    .background(.blue.opacity(0.2))
+                    .cornerRadius(20)
+                }
+            }
+            .padding(20)
+            
+            // Back button in top corner
+            VStack {
+                HStack {
+                    Button(action: {
+                        isPresented = false
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 18, weight: .semibold))
+                            Text("Back")
+                                .font(.system(size: 16, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(20)
+                    }
+                    
+                    Spacer()
+                }
+                .padding(.top, 50)
+                .padding(.horizontal, 20)
+                
+                Spacer()
+            }
+        }
+    }
+}
+
+// MARK: - AR Ruler Placeholder (for the other ready experience)
+struct ARRulerView: View {
+    @Binding var isPresented: Bool
+    @State private var isAnimating = false
+    
+    var body: some View {
+        ZStack {
+            // Gradient background
+            LinearGradient(
+                colors: [Color.gray, Color.blue, Color.black],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+            
+            VStack(spacing: 40) {
+                // Animated ruler icon
+                ZStack {
+                    Circle()
+                        .fill(.white.opacity(0.1))
+                        .frame(width: 150, height: 150)
+                        .blur(radius: 30)
+                        .scaleEffect(isAnimating ? 1.2 : 0.8)
+                        .animation(.easeInOut(duration: 2).repeatForever(autoreverses: true), value: isAnimating)
+                    
+                    Image(systemName: "ruler.fill")
+                        .font(.system(size: 60, weight: .light))
+                        .foregroundColor(.white)
+                        .rotationEffect(.degrees(isAnimating ? 360 : 0))
+                        .animation(.linear(duration: 10).repeatForever(autoreverses: false), value: isAnimating)
+                }
+                
+                VStack(spacing: 16) {
+                    Text("AR Ruler")
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    
+                    Text("Measure objects in the real world\nwith precision AR technology")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.white.opacity(0.8))
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(4)
+                    
+                    // Features
+                    HStack(spacing: 12) {
+                        Text("Measuring")
+                        Text("Precision")
+                        Text("Units")
+                        Text("Save")
+                    }
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.white)
+                }
+                
+                VStack(spacing: 20) {
+                    Text("Coming Soon")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.orange)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(.black.opacity(0.3))
+                        .cornerRadius(16)
+                    
+                    Button("Back to Home") {
+                        isPresented = false
+                    }
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 16)
+                    .background(.white.opacity(0.2))
+                    .cornerRadius(25)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 25)
+                            .stroke(.white.opacity(0.3), lineWidth: 1)
+                    )
+                }
+            }
+            .padding(20)
+            .onAppear {
+                isAnimating = true
+            }
+            
+            // Back button in top corner
+            VStack {
+                HStack {
+                    Button(action: {
+                        isPresented = false
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 18, weight: .semibold))
+                            Text("Back")
+                                .font(.system(size: 16, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(20)
+                        .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                    }
+                    
+                    Spacer()
+                }
+                .padding(.top, 50)
+                .padding(.horizontal, 20)
+                
+                Spacer()
             }
         }
     }
@@ -470,6 +964,15 @@ struct ARExperience: Identifiable {
             category: .creative,
             gradientColors: [.blue, .purple],
             features: ["Multi-touch", "Physics", "7 Objects", "Materials"],
+            status: .ready
+        ),
+        ARExperience(
+            title: "AR Video Player",
+            description: "Watch videos floating in your real space",
+            icon: "play.rectangle.fill",
+            category: .creative,
+            gradientColors: [.red, .pink],
+            features: ["URL Support", "Controls", "Resize", "Position"],
             status: .ready
         ),
         ARExperience(
