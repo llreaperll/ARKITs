@@ -78,6 +78,12 @@ struct HomeView: View {
                             print("✅ Experience found: \(experience.title)")
                             print("🎬 Showing AR Video Player")
                         }
+                case "YouTube Player":
+                    YouTubeARPlayerView(isPresented: $showingARView)
+                        .onAppear {
+                            print("✅ Experience found: \(experience.title)")
+                            print("📺 Showing YouTube Player")
+                        }
                 case "AR Ruler":
                     ARRulerView(isPresented: $showingARView)
                         .onAppear {
@@ -973,6 +979,15 @@ struct ARExperience: Identifiable {
             category: .creative,
             gradientColors: [.red, .pink],
             features: ["URL Support", "Controls", "Resize", "Position"],
+            status: .ready
+        ),
+        ARExperience(
+            title: "YouTube Player",
+            description: "Watch YouTube videos in fullscreen AR",
+            icon: "play.tv.fill",
+            category: .creative,
+            gradientColors: [.red, .orange],
+            features: ["YouTube", "Fullscreen", "WebView", "Controls"],
             status: .ready
         ),
         ARExperience(

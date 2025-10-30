@@ -1,7 +1,7 @@
 import SwiftUI
 import ARKit
 import SceneKit
-import AVFoundation 
+import AVFoundation
 import AVKit
 
 struct ARVideoPlayerView: View {
@@ -9,6 +9,10 @@ struct ARVideoPlayerView: View {
     @State private var videoURL: String = ""
     @State private var showingURLInput = false
     @State private var cameraPermissionDenied = false
+    @State private var isPlaying = false
+    @State private var showingControls = false
+    @State private var currentTime: Double = 0
+    @State private var duration: Double = 0
     
     var body: some View {
         ZStack {
@@ -16,7 +20,11 @@ struct ARVideoPlayerView: View {
                 PermissionDeniedView(isPresented: $isPresented)
             } else {
                 // AR Video Player
-                ARVideoContainer()
+                ARVideoContainer(
+                    isPlaying: $isPlaying,
+                    currentTime: $currentTime,
+                    duration: $duration
+                )
                 
                 // Top overlay with controls
                 VStack {
@@ -68,18 +76,63 @@ struct ARVideoPlayerView: View {
                     
                     Spacer()
                     
-                    // Instructions
+                    // Instructions and Controls
                     VStack(spacing: 12) {
-                        Text("📱 Tap \"Add Video\" to enter a video URL")
-                            .font(.caption)
-                            .foregroundColor(.white)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(.black.opacity(0.7))
-                            .cornerRadius(10)
+                        if videoURL.isEmpty {
+                            Text("📱 Tap \"Add Video\" to enter a video URL")
+                                .font(.caption)
+                                .foregroundColor(.white)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(.black.opacity(0.7))
+                                .cornerRadius(10)
+                        } else {
+                            // Simple video controls at bottom
+                            HStack(spacing: 20) {
+                                // Backward 10s
+                                Button(action: {
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("SeekVideo"),
+                                        object: ["action": "backward"]
+                                    )
+                                }) {
+                                    Image(systemName: "gobackward.10")
+                                        .font(.system(size: 20))
+                                        .foregroundColor(.white)
+                                }
+                                
+                                // Play/Pause
+                                Button(action: {
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("TogglePlayPause"),
+                                        object: nil
+                                    )
+                                }) {
+                                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                                        .font(.system(size: 24))
+                                        .foregroundColor(.white)
+                                }
+                                
+                                // Forward 10s
+                                Button(action: {
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("SeekVideo"),
+                                        object: ["action": "forward"]
+                                    )
+                                }) {
+                                    Image(systemName: "goforward.10")
+                                        .font(.system(size: 20))
+                                        .foregroundColor(.white)
+                                }
+                            }
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 12)
+                            .background(.black.opacity(0.8))
+                            .cornerRadius(20)
+                        }
                         
-                        Text("🎯 Tap to place video • 🖐️ Drag to move • 🤏 Pinch to resize")
+                        Text("🎯 Tap to place/move • 🖐️ Drag to reposition • 🤏 Pinch to resize")
                             .font(.caption)
                             .foregroundColor(.white)
                             .multilineTextAlignment(.center)
@@ -119,7 +172,119 @@ struct ARVideoPlayerView: View {
     }
 }
 
-// MARK: - Video URL Input View
+// MARK: - Video Controls Overlay
+struct VideoControlsOverlay: View {
+    @Binding var isPlaying: Bool
+    @Binding var currentTime: Double
+    @Binding var duration: Double
+    @Binding var showingControls: Bool
+    @State private var isDragging = false
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            // Main control buttons
+            HStack(spacing: 30) {
+                // Backward 10s
+                Button(action: {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("SeekVideo"),
+                        object: ["action": "backward"]
+                    )
+                }) {
+                    Image(systemName: "gobackward.10")
+                        .font(.system(size: 24))
+                        .foregroundColor(.white)
+                }
+                
+                // Play/Pause
+                Button(action: {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("TogglePlayPause"),
+                        object: nil
+                    )
+                }) {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 32))
+                        .foregroundColor(.white)
+                }
+                
+                // Forward 10s
+                Button(action: {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("SeekVideo"),
+                        object: ["action": "forward"]
+                    )
+                }) {
+                    Image(systemName: "goforward.10")
+                        .font(.system(size: 24))
+                        .foregroundColor(.white)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 16)
+            .background(.black.opacity(0.8))
+            .cornerRadius(25)
+            
+            // Progress bar
+            if duration > 0 {
+                VStack(spacing: 8) {
+                    // Seek bar
+                    HStack {
+                        Text(formatTime(currentTime))
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.8))
+                        
+                        ZStack(alignment: .leading) {
+                            // Background
+                            Rectangle()
+                                .fill(.white.opacity(0.3))
+                                .frame(height: 4)
+                                .cornerRadius(2)
+                            
+                            // Progress
+                            Rectangle()
+                                .fill(.red)
+                                .frame(width: max(0, CGFloat(currentTime / duration) * 200), height: 4)
+                                .cornerRadius(2)
+                        }
+                        .frame(width: 200)
+                        .gesture(
+                            DragGesture()
+                                .onChanged { value in
+                                    isDragging = true
+                                    let progress = min(max(0, value.location.x / 200), 1)
+                                    let seekTime = progress * duration
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("SeekVideo"),
+                                        object: ["action": "seek", "time": seekTime]
+                                    )
+                                }
+                                .onEnded { _ in
+                                    isDragging = false
+                                }
+                        )
+                        
+                        Text(formatTime(duration))
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(.black.opacity(0.7))
+                .cornerRadius(15)
+            }
+        }
+    }
+    
+    private func formatTime(_ time: Double) -> String {
+        let minutes = Int(time) / 60
+        let seconds = Int(time) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
+// MARK: - Video URL Input View (unchanged)
 struct VideoURLInputView: View {
     @Binding var videoURL: String
     @Binding var isPresented: Bool
@@ -127,90 +292,110 @@ struct VideoURLInputView: View {
     
     var body: some View {
         NavigationView {
-            VStack(spacing: 30) {
-                VStack(spacing: 16) {
-                    Image(systemName: "play.rectangle.fill")
-                        .font(.system(size: 60))
+            ScrollView {
+                VStack(spacing: 30) {
+                    VStack(spacing: 16) {
+                        Image(systemName: "play.rectangle.fill")
+                            .font(.system(size: 60))
+                            .foregroundColor(.red)
+                        
+                        Text("Add Video URL")
+                            .font(.title)
+                            .fontWeight(.bold)
+                        
+                        Text("Enter a video URL to play in AR space")
+                            .font(.body)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Video URL")
+                            .font(.headline)
+                        
+                        TextField("https://example.com/video.mp4", text: $tempURL)
+                            .textFieldStyle(.roundedBorder)
+                            .autocapitalization(.none)
+                            .autocorrectionDisabled()
+                            .keyboardType(.URL)
+                    }
+                    
+                    // Sample URLs
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Sample Videos")
+                            .font(.headline)
+                        
+                        VStack(spacing: 8) {
+                            SampleURLButton(
+                                title: "Big Buck Bunny",
+                                url: "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+                                tempURL: $tempURL
+                            )
+                            
+                            SampleURLButton(
+                                title: "Elephant Dream",
+                                url: "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+                                tempURL: $tempURL
+                            )
+                            
+                            SampleURLButton(
+                                title: "Sintel",
+                                url: "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+                                tempURL: $tempURL
+                            )
+                            
+                            SampleURLButton(
+                                title: "Tears of Steel",
+                                url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+                                tempURL: $tempURL
+                            )
+                            
+                            SampleURLButton(
+                                title: "For Bigger Escapes",
+                                url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+                                tempURL: $tempURL
+                            )
+                            
+                            SampleURLButton(
+                                title: "Sample Video HD",
+                                url: "https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_5mb.mp4",
+                                tempURL: $tempURL
+                            )
+                        }
+                    }
+                    
+                    // Buttons at bottom
+                    HStack(spacing: 16) {
+                        Button("Cancel") {
+                            isPresented = false
+                        }
+                        .font(.system(size: 18, weight: .medium))
                         .foregroundColor(.red)
-                    
-                    Text("Add Video URL")
-                        .font(.title)
-                        .fontWeight(.bold)
-                    
-                    Text("Enter a video URL to play in AR space")
-                        .font(.body)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Video URL")
-                        .font(.headline)
-                    
-                    TextField("https://example.com/video.mp4", text: $tempURL)
-                        .textFieldStyle(.roundedBorder)
-                        .autocapitalization(.none)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                }
-                
-                // Sample URLs
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Sample Videos")
-                        .font(.headline)
-                    
-                    VStack(spacing: 8) {
-                        SampleURLButton(
-                            title: "Big Buck Bunny",
-                            url: "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-                            tempURL: $tempURL
-                        )
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(.red.opacity(0.1))
+                        .cornerRadius(12)
                         
-                        SampleURLButton(
-                            title: "Elephant Dream",
-                            url: "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
-                            tempURL: $tempURL
-                        )
-                        
-                        SampleURLButton(
-                            title: "Sintel",
-                            url: "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
-                            tempURL: $tempURL
-                        )
+                        Button("Add Video") {
+                            videoURL = tempURL
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("LoadVideo"),
+                                object: tempURL
+                            )
+                            isPresented = false
+                        }
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(tempURL.isEmpty ? .gray : .blue)
+                        .cornerRadius(12)
+                        .disabled(tempURL.isEmpty)
                     }
+                    .padding(.top, 20)
                 }
-                
-                Spacer()
-                
-                HStack(spacing: 16) {
-                    Button("Cancel") {
-                        isPresented = false
-                    }
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(.red)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(.red.opacity(0.1))
-                    .cornerRadius(12)
-                    
-                    Button("Add Video") {
-                        videoURL = tempURL
-                        NotificationCenter.default.post(
-                            name: NSNotification.Name("LoadVideo"),
-                            object: tempURL
-                        )
-                        isPresented = false
-                    }
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(tempURL.isEmpty ? .gray : .blue)
-                    .cornerRadius(12)
-                    .disabled(tempURL.isEmpty)
-                }
+                .padding(20)
             }
-            .padding(20)
             .navigationTitle("Video Player")
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -248,6 +433,9 @@ struct SampleURLButton: View {
 
 // MARK: - AR Video Container
 struct ARVideoContainer: UIViewRepresentable {
+    @Binding var isPlaying: Bool
+    @Binding var currentTime: Double
+    @Binding var duration: Double
     
     func makeUIView(context: Context) -> ARSCNView {
         let arView = ARSCNView(frame: .zero)
@@ -272,6 +460,9 @@ struct ARVideoContainer: UIViewRepresentable {
         arView.addGestureRecognizer(pinchGesture)
         
         coordinator.arView = arView
+        coordinator.isPlaying = isPlaying
+        coordinator.currentTime = currentTime
+        coordinator.duration = duration
         
         // Setup notifications
         NotificationCenter.default.addObserver(coordinator,
@@ -279,24 +470,58 @@ struct ARVideoContainer: UIViewRepresentable {
                                              name: NSNotification.Name("LoadVideo"),
                                              object: nil)
         
+        NotificationCenter.default.addObserver(coordinator,
+                                             selector: #selector(VideoCoordinator.togglePlayPause),
+                                             name: NSNotification.Name("TogglePlayPause"),
+                                             object: nil)
+        
+        NotificationCenter.default.addObserver(coordinator,
+                                             selector: #selector(VideoCoordinator.seekVideo(_:)),
+                                             name: NSNotification.Name("SeekVideo"),
+                                             object: nil)
+        
         return arView
     }
     
     func updateUIView(_ uiView: ARSCNView, context: Context) {
-        // Updates can be handled here if needed
+        context.coordinator.isPlaying = isPlaying
+        context.coordinator.currentTime = currentTime
+        context.coordinator.duration = duration
     }
     
     func makeCoordinator() -> VideoCoordinator {
-        VideoCoordinator()
+        VideoCoordinator(
+            isPlayingBinding: $isPlaying,
+            currentTimeBinding: $currentTime,
+            durationBinding: $duration
+        )
     }
     
-    // MARK: - Video Coordinator
+    // MARK: - Enhanced Video Coordinator
     class VideoCoordinator: NSObject, ARSCNViewDelegate {
         var arView: ARSCNView?
         var videoPlayer: AVPlayer?
+        var videoPlayerItem: AVPlayerItem?
         var videoNode: SCNNode?
         var selectedNode: SCNNode?
         var videoScreen: SCNPlane?
+        var timeObserver: Any?
+        
+        // Bindings
+        var isPlayingBinding: Binding<Bool>
+        var currentTimeBinding: Binding<Double>
+        var durationBinding: Binding<Double>
+        
+        // Properties
+        var isPlaying: Bool = false {
+            didSet { isPlayingBinding.wrappedValue = isPlaying }
+        }
+        var currentTime: Double = 0 {
+            didSet { currentTimeBinding.wrappedValue = currentTime }
+        }
+        var duration: Double = 0 {
+            didSet { durationBinding.wrappedValue = duration }
+        }
         
         let lightsNode: SCNNode = {
             let lightNode = SCNNode()
@@ -308,6 +533,12 @@ struct ARVideoContainer: UIViewRepresentable {
             return lightNode
         }()
         
+        init(isPlayingBinding: Binding<Bool>, currentTimeBinding: Binding<Double>, durationBinding: Binding<Double>) {
+            self.isPlayingBinding = isPlayingBinding
+            self.currentTimeBinding = currentTimeBinding
+            self.durationBinding = durationBinding
+        }
+        
         @objc func loadVideo(_ notification: Notification) {
             guard let urlString = notification.object as? String,
                   let url = URL(string: urlString) else { return }
@@ -318,13 +549,34 @@ struct ARVideoContainer: UIViewRepresentable {
             videoNode?.removeFromParentNode()
             videoPlayer?.pause()
             
+            // Remove time observer
+            if let observer = timeObserver {
+                videoPlayer?.removeTimeObserver(observer)
+                timeObserver = nil
+            }
+            
             // Create new video player
-            videoPlayer = AVPlayer(url: url)
+            videoPlayerItem = AVPlayerItem(url: url)
+            videoPlayer = AVPlayer(playerItem: videoPlayerItem)
+            
+            // Add time observer
+            let interval = CMTime(seconds: 0.1, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+            timeObserver = videoPlayer?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+                guard let self = self else { return }
+                self.currentTime = time.seconds
+                
+                if let duration = self.videoPlayerItem?.duration.seconds, duration.isFinite {
+                    self.duration = duration
+                }
+                
+                self.isPlaying = self.videoPlayer?.timeControlStatus == .playing
+            }
             
             // Create video material
             let videoMaterial = SCNMaterial()
             videoMaterial.diffuse.contents = videoPlayer
-            videoMaterial.emission.contents = videoPlayer // Make it self-illuminating
+            videoMaterial.emission.contents = videoPlayer
+            videoMaterial.isDoubleSided = true
             
             // Create video screen geometry
             videoScreen = SCNPlane(width: 1.6, height: 0.9) // 16:9 aspect ratio
@@ -343,7 +595,14 @@ struct ARVideoContainer: UIViewRepresentable {
                     transform.columns.3.z - 2.0
                 )
                 videoNode?.position = position
+                
+                // Make the video face the camera
+                videoNode?.look(at: SCNVector3(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z))
             }
+            
+            // Add physics body for better interaction
+            let shape = SCNPhysicsShape(geometry: videoScreen!, options: nil)
+            videoNode?.physicsBody = SCNPhysicsBody(type: .static, shape: shape)
             
             // Add to scene
             arView?.scene.rootNode.addChildNode(videoNode!)
@@ -354,6 +613,46 @@ struct ARVideoContainer: UIViewRepresentable {
             print("✅ Video loaded and playing")
         }
         
+        @objc func togglePlayPause() {
+            guard let videoPlayer = videoPlayer else { return }
+            
+            if videoPlayer.timeControlStatus == .playing {
+                videoPlayer.pause()
+                print("⏸️ Video paused")
+            } else {
+                videoPlayer.play()
+                print("▶️ Video playing")
+            }
+        }
+        
+        @objc func seekVideo(_ notification: Notification) {
+            guard let videoPlayer = videoPlayer,
+                  let data = notification.object as? [String: Any],
+                  let action = data["action"] as? String else { return }
+            
+            switch action {
+            case "forward":
+                let newTime = videoPlayer.currentTime() + CMTime(seconds: 10, preferredTimescale: 1)
+                videoPlayer.seek(to: newTime)
+                print("⏭️ Seek forward 10s")
+                
+            case "backward":
+                let newTime = videoPlayer.currentTime() - CMTime(seconds: 10, preferredTimescale: 1)
+                videoPlayer.seek(to: max(newTime, CMTime.zero))
+                print("⏮️ Seek backward 10s")
+                
+            case "seek":
+                if let time = data["time"] as? Double {
+                    let newTime = CMTime(seconds: time, preferredTimescale: 1)
+                    videoPlayer.seek(to: newTime)
+                    print("🎯 Seek to \(time)s")
+                }
+                
+            default:
+                break
+            }
+        }
+        
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
             guard let arView = arView else { return }
             let location = gesture.location(in: arView)
@@ -362,49 +661,93 @@ struct ARVideoContainer: UIViewRepresentable {
             
             if let hitResult = hitResults.first {
                 if hitResult.node.name == "videoPlayer" {
-                    // Tapped on video - toggle play/pause
+                    // Double tap on video - toggle play/pause
                     selectedNode = hitResult.node
                     highlightVideoNode(selectedNode!)
                     togglePlayPause()
-                } else {
-                    // Tapped elsewhere - move video to that location
-                    moveVideoToLocation(location)
+                    
+                    // Remove highlight after delay
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        self.removeHighlight(hitResult.node)
+                    }
+                } else if hitResult.node.name?.contains("plane") != true {
+                    // Tapped on other object - ignore
+                    return
                 }
             } else {
-                // Tapped on empty space - move video there
-                moveVideoToLocation(location)
+                // Tapped on empty space - move video there if it exists
+                if videoNode != nil {
+                    moveVideoToLocation(location)
+                }
             }
         }
         
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
-            guard let selectedNode = selectedNode,
+            guard let videoNode = videoNode,
                   let arView = arView else { return }
             
             let location = gesture.location(in: arView)
             
             switch gesture.state {
             case .began:
-                selectedNode.physicsBody?.type = .kinematic
+                selectedNode = videoNode
+                highlightVideoNode(videoNode)
                 
             case .changed:
+                // Use multiple methods for smoother dragging
+                var worldPosition: SCNVector3?
+                
+                // Method 1: Plane hit test
                 let planeHitResults = arView.hitTest(location, types: [.existingPlaneUsingExtent, .estimatedHorizontalPlane])
                 if let hitResult = planeHitResults.first {
-                    let position = SCNVector3(
+                    worldPosition = SCNVector3(
                         hitResult.worldTransform.columns.3.x,
-                        hitResult.worldTransform.columns.3.y + 0.1,
+                        hitResult.worldTransform.columns.3.y + 0.2,
                         hitResult.worldTransform.columns.3.z
                     )
-                    
+                }
+                
+                // Method 2: Feature points
+                if worldPosition == nil {
+                    let featureHitResults = arView.hitTest(location, types: [.featurePoint])
+                    if let hitResult = featureHitResults.first {
+                        worldPosition = SCNVector3(
+                            hitResult.worldTransform.columns.3.x,
+                            hitResult.worldTransform.columns.3.y + 0.2,
+                            hitResult.worldTransform.columns.3.z
+                        )
+                    }
+                }
+                
+                // Method 3: Keep same distance from camera
+                if worldPosition == nil {
+                    if let currentFrame = arView.session.currentFrame {
+                        let screenPoint = CGPoint(x: location.x, y: location.y)
+                        let cameraTransform = currentFrame.camera.transform
+                        let cameraPosition = SCNVector3(
+                            cameraTransform.columns.3.x,
+                            cameraTransform.columns.3.y,
+                            cameraTransform.columns.3.z
+                        )
+                        
+                        // Project screen point to world at same distance as current video
+                        let currentDistance = distance(videoNode.position, cameraPosition)
+                        let ray = arView.unprojectPoint(SCNVector3(Float(screenPoint.x), Float(screenPoint.y), 0.5))
+                        let direction = normalize(subtractVector(ray, cameraPosition))
+                        worldPosition = addVector(cameraPosition, multiplyVector(direction, currentDistance))
+                    }
+                }
+                
+                if let position = worldPosition {
                     SCNTransaction.begin()
-                    SCNTransaction.animationDuration = 0.1
-                    selectedNode.position = position
+                    SCNTransaction.animationDuration = 0.05 // Faster updates for smoother dragging
+                    videoNode.position = position
                     SCNTransaction.commit()
                 }
                 
             case .ended:
-                selectedNode.physicsBody?.type = .static
-                removeHighlight(selectedNode)
-                self.selectedNode = nil
+                removeHighlight(videoNode)
+                selectedNode = nil
                 
             default:
                 break
@@ -417,7 +760,7 @@ struct ARVideoContainer: UIViewRepresentable {
             switch gesture.state {
             case .began:
                 selectedNode = videoNode
-                highlightVideoNode(selectedNode!)
+                highlightVideoNode(videoNode)
                 
             case .changed:
                 let scale = Float(gesture.scale)
@@ -428,11 +771,11 @@ struct ARVideoContainer: UIViewRepresentable {
                     currentScale.z * scale
                 )
                 
-                // Limit scale between 0.5x and 3x
+                // Limit scale between 0.3x and 4x for better range
                 let clampedScale = SCNVector3(
-                    max(0.5, min(3.0, newScale.x)),
-                    max(0.5, min(3.0, newScale.y)),
-                    max(0.5, min(3.0, newScale.z))
+                    max(0.3, min(4.0, newScale.x)),
+                    max(0.3, min(4.0, newScale.y)),
+                    max(0.3, min(4.0, newScale.z))
                 )
                 
                 videoNode.scale = clampedScale
@@ -454,12 +797,12 @@ struct ARVideoContainer: UIViewRepresentable {
             if let hitResult = planeHitResults.first {
                 let position = SCNVector3(
                     hitResult.worldTransform.columns.3.x,
-                    hitResult.worldTransform.columns.3.y + 0.1,
+                    hitResult.worldTransform.columns.3.y + 0.2,
                     hitResult.worldTransform.columns.3.z
                 )
                 
                 SCNTransaction.begin()
-                SCNTransaction.animationDuration = 0.5
+                SCNTransaction.animationDuration = 0.3
                 videoNode.position = position
                 SCNTransaction.commit()
                 
@@ -467,37 +810,41 @@ struct ARVideoContainer: UIViewRepresentable {
             }
         }
         
-        func togglePlayPause() {
-            guard let videoPlayer = videoPlayer else { return }
-            
-            if videoPlayer.timeControlStatus == .playing {
-                videoPlayer.pause()
-                print("⏸️ Video paused")
-            } else {
-                videoPlayer.play()
-                print("▶️ Video playing")
-            }
-        }
-        
         func highlightVideoNode(_ node: SCNNode) {
             let highlightAction = SCNAction.sequence([
-                SCNAction.scale(to: 1.05, duration: 0.1),
-                SCNAction.scale(to: 1.0, duration: 0.1)
+                SCNAction.scale(to: 1.02, duration: 0.05),
+                SCNAction.scale(to: 1.0, duration: 0.05)
             ])
             node.runAction(highlightAction)
-            
-            // Add glow effect
-            node.geometry?.materials.forEach { material in
-                material.emission.intensity = 1.2
-            }
-            
-            print("🎬 Video highlighted")
         }
         
         func removeHighlight(_ node: SCNNode) {
-            node.geometry?.materials.forEach { material in
-                material.emission.intensity = 1.0
-            }
+            // Reset any highlighting
+        }
+        
+        // Helper functions
+        func distance(_ a: SCNVector3, _ b: SCNVector3) -> Float {
+            let dx = a.x - b.x
+            let dy = a.y - b.y
+            let dz = a.z - b.z
+            return sqrt(dx*dx + dy*dy + dz*dz)
+        }
+        
+        func normalize(_ vector: SCNVector3) -> SCNVector3 {
+            let length = sqrt(vector.x*vector.x + vector.y*vector.y + vector.z*vector.z)
+            return SCNVector3(vector.x/length, vector.y/length, vector.z/length)
+        }
+        
+        func subtractVector(_ a: SCNVector3, _ b: SCNVector3) -> SCNVector3 {
+            return SCNVector3(a.x - b.x, a.y - b.y, a.z - b.z)
+        }
+        
+        func addVector(_ a: SCNVector3, _ b: SCNVector3) -> SCNVector3 {
+            return SCNVector3(a.x + b.x, a.y + b.y, a.z + b.z)
+        }
+        
+        func multiplyVector(_ vector: SCNVector3, _ scalar: Float) -> SCNVector3 {
+            return SCNVector3(vector.x * scalar, vector.y * scalar, vector.z * scalar)
         }
         
         // MARK: - ARSCNViewDelegate
@@ -507,12 +854,13 @@ struct ARVideoContainer: UIViewRepresentable {
             let planeGeometry = SCNPlane(width: CGFloat(planeAnchor.extent.x),
                                        height: CGFloat(planeAnchor.extent.z))
             let material = SCNMaterial()
-            material.diffuse.contents = UIColor.blue.withAlphaComponent(0.2)
+            material.diffuse.contents = UIColor.blue.withAlphaComponent(0.1)
             planeGeometry.materials = [material]
             
             let planeNode = SCNNode(geometry: planeGeometry)
             planeNode.position = SCNVector3(planeAnchor.center.x, 0, planeAnchor.center.z)
             planeNode.transform = SCNMatrix4MakeRotation(-Float.pi / 2, 1, 0, 0)
+            planeNode.name = "plane"
             
             node.addChildNode(planeNode)
         }
